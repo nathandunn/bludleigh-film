@@ -47,10 +47,14 @@ var _dur: float = 0.0
 var _film_time: float = 0.0
 var _speed: float = 1.0
 var _check := false
+## Rendering in chunks: --chunk=k renders from the k-th scene change to the
+## next, ending with the paper up over the cut, which is how the next chunk
+## begins - so the chunks join seamlessly and a killed render loses one scene.
+var _first_page := 0
+var _end_page := -1
 var _audit := false
 var _problems := 0
 var _prev_set := ""
-var _seen_sets: Dictionary = {}
 var _cut_done := false
 var _pending: int = 0
 var _report := 0.0
@@ -107,9 +111,23 @@ func _ready() -> void:
 	letters.folio = ""
 	layer.add_child(letters)
 	pages = Story.pages()
-	print("film: %d pages, %s" % [pages.size(), "movie maker" if OS.has_feature("movie") else ("check" if _check else "preview")])
-	_pending = 0
+	var starts := _scene_starts()
+	print("film: %d pages, %d scenes, %s" % [pages.size(), starts.size(), "movie maker" if OS.has_feature("movie") else ("check" if _check else "preview")])
+	if _arg("--chunk") != "":
+		var k := int(_arg("--chunk"))
+		_first_page = starts[k]
+		_end_page = starts[k + 1] if k + 1 < starts.size() else -1
+		print("film: chunk %d = pages %d..%d" % [k, _first_page + 1, (_end_page if _end_page > 0 else pages.size())])
+	_pending = _first_page
 	_start_cut()
+
+
+func _scene_starts() -> Array:
+	var out := []
+	for i in pages.size():
+		if i == 0 or pages[i]["set"] != pages[i - 1]["set"]:
+			out.append(i)
+	return out
 
 
 # --- The timeline ---------------------------------------------------------------------
@@ -140,6 +158,9 @@ func _process(delta: float) -> void:
 			var half := WIPE * 0.5
 			letters.wipe = clampf(1.0 - absf(_clock / half - 1.0), 0.0, 1.0) if index >= 0 or _cut_done else 1.0
 			if not _cut_done and _clock >= half:
+				if _pending == _end_page:
+					_finish()
+					return
 				_cut_done = true
 				_arrive(_pending, false)
 			if _clock >= WIPE:
@@ -155,14 +176,19 @@ func _process(delta: float) -> void:
 		State.END:
 			letters.wipe = clampf(_clock / 1.2, 0.0, 1.0)
 			if _clock >= 1.6:
-				print("FILM COMPLETE %.1f s (%d frames at %d fps), %d layout problems" % [_film_time, int(_film_time * FPS), int(FPS), _problems])
-				get_tree().quit()
+				_finish()
+				return
 	if _film_time >= _report:
 		_report += 15.0
 		if _has_flag("--trace"):
 			print("trace: frame %d film %.2f state %d page %d clock %.2f dur %.2f" % [_frames, _film_time, _state, index, _clock, _dur])
 		if OS.has_feature("movie"):
 			print("film: %d:%02d rendered (page %d)" % [int(_film_time) / 60, int(_film_time) % 60, index + 1])
+
+
+func _finish() -> void:
+	print("FILM COMPLETE %.1f s (%d frames at %d fps), %d layout problems" % [_film_time, int(_film_time * FPS), int(FPS), _problems])
+	get_tree().quit()
 
 
 ## Leave the current page: if the next is in another set, the travellers walk
@@ -172,6 +198,21 @@ func _leave_for(next: int) -> void:
 	if next >= pages.size():
 		_state = State.END
 		_clock = 0.0
+		return
+	if next == _end_page:
+		# This chunk's last scene: walk out and put the paper up, then stop.
+		letters.page = {}
+		var walkers := 0
+		var nxt: Dictionary = pages[next].get("cast", {})
+		for id in cast:
+			var f: Figure = cast[id]
+			if f.visible and not f.seated and nxt.has(id):
+				var out := _offstage(f.position, _side_of(f.position))
+				_walk_to(id, out, f.position.distance_to(out) / WALK_SPEED, {"hide": true})
+				walkers += 1
+		_state = State.EXIT
+		_clock = 0.0
+		_dur = EXIT_TIME if walkers > 0 else 0.3
 		return
 	var same: bool = index >= 0 and pages[index]["set"] == pages[next]["set"]
 	letters.page = {}
@@ -223,8 +264,12 @@ func _arrive(i: int, same_set: bool) -> void:
 		sets[s].visible = s == set_name
 	_prune_sets(set_name)
 	if not same_set:
-		var n: int = _seen_sets.get(set_name, 0)
-		_seen_sets[set_name] = n + 1
+		# Which visit to this set this is, counted over the whole book, so a
+		# chunk rendered on its own still names its chapter right.
+		var n := 0
+		for st in _scene_starts():
+			if st < i and pages[st]["set"] == set_name:
+				n += 1
 		var names: Array = CHAPTERS.get(set_name, [set_name])
 		print("CHAPTER %.2f %s" % [_film_time, names[mini(n, names.size() - 1)]])
 	var windows: Array = root.get_meta("windows", []) if set_name == "exterior" else []
