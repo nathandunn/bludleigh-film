@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bludleigh — the film</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Two gentle poets visit a house that has been killing things for four hundred years. An animated graphic novel after P. G. Wodehouse.">
+<meta name="theme-color" content="#efe7d6">
+<link rel="icon" href="poster.webp">
+<style>
+	/* The film is rendered by the Godot project at build time (see build.sh):
+	   what ships is an MP4, a poster and this page. No engine, no WebGL. */
+	:root { --paper: #efe7d6; --ink: #12101a; --caption: #efdc9c; }
+	html, body { margin: 0; min-height: 100%; background: var(--paper); color: var(--ink);
+	             font: 17px/1.45 "Crimson Pro", Georgia, "Times New Roman", serif; }
+	body { display: flex; flex-direction: column; align-items: center; padding: 0 16px 32px; box-sizing: border-box; }
+	header { width: min(1200px, 100%); padding: 22px 0 12px; display: flex; align-items: baseline; gap: 1em; flex-wrap: wrap; }
+	h1 { margin: 0; font: 700 clamp(28px, 5vw, 44px)/1 Gloock, "Playfair Display", Georgia, serif; letter-spacing: .01em; }
+	header .sub { font-style: italic; opacity: .75; }
+	.film { width: min(1200px, 100%); }
+	video { display: block; width: 100%; aspect-ratio: 16 / 9; background: var(--paper); border: 4px solid var(--ink); box-sizing: border-box; outline: none; }
+	nav { width: min(1200px, 100%); margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
+	nav span { font-style: italic; opacity: .7; margin-right: .3em; }
+	nav button { font: inherit; font-size: 15px; color: var(--ink); background: var(--caption); border: 2px solid var(--ink);
+	             padding: 4px 12px; border-radius: 999px; cursor: pointer; }
+	nav button.now { background: var(--ink); color: var(--paper); }
+	nav button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+	p.help { width: min(1200px, 100%); margin: 14px 0 0; font-style: italic; opacity: .65; font-size: 15px; }
+	p.help a { color: inherit; }
+	@media (max-width: 600px) { body { padding: 0 0 24px; } header, nav, p.help { padding-left: 12px; padding-right: 12px; box-sizing: border-box; } video { border-left: 0; border-right: 0; } }
+</style>
+</head>
+<body>
+<header>
+	<h1>Bludleigh</h1>
+	<div class="sub">a Mulliner story, after P. G. Wodehouse &middot; __MINUTES__</div>
+</header>
+<div class="film">
+	<video id="film" controls playsinline preload="metadata" poster="poster.webp">
+		<source src="bludleigh.mp4" type="video/mp4">
+		Your browser cannot play this film; <a href="bludleigh.mp4">download it</a> instead.
+	</video>
+</div>
+<nav id="chapters" aria-label="Chapters"><span>Scenes:</span></nav>
+<p class="help">Space plays and pauses; ← and → skip five seconds; [ and ] change scene; F is full screen.
+Faces drawn by Nathan. <a href="https://hunting-lodge.apps.precogsoftwareservices.com">Read it as a book</a> instead.</p>
+<script>
+(() => {
+	const CHAPTERS = __CHAPTERS__;   // [[seconds, "name"], ...] from the render log
+	const v = document.getElementById('film');
+	const nav = document.getElementById('chapters');
+	const buttons = CHAPTERS.map(([t, name], i) => {
+		const b = document.createElement('button');
+		b.textContent = name;
+		b.title = `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+		b.addEventListener('click', () => { v.currentTime = Math.max(0, t - 0.1); v.play(); });
+		nav.appendChild(b);
+		return b;
+	});
+	const chapterAt = t => { let k = 0; CHAPTERS.forEach(([s], i) => { if (t >= s - 0.2) k = i; }); return k; };
+	v.addEventListener('timeupdate', () => {
+		const k = chapterAt(v.currentTime);
+		buttons.forEach((b, i) => b.classList.toggle('now', i === k));
+	});
+	addEventListener('keydown', e => {
+		if (e.metaKey || e.ctrlKey || e.altKey || e.target.tagName === 'BUTTON') return;
+		switch (e.key) {
+			case ' ': case 'k': v.paused ? v.play() : v.pause(); break;
+			case 'ArrowRight': v.currentTime += 5; break;
+			case 'ArrowLeft': v.currentTime -= 5; break;
+			case ']': { const k = Math.min(CHAPTERS.length - 1, chapterAt(v.currentTime) + 1); v.currentTime = CHAPTERS[k][0]; break; }
+			case '[': { const k = chapterAt(v.currentTime - 2); v.currentTime = CHAPTERS[Math.max(0, k)][0]; break; }
+			case 'f': case 'F': document.fullscreenElement ? document.exitFullscreen() : (v.requestFullscreen || v.webkitEnterFullscreen).call(v); break;
+			case 'Home': v.currentTime = 0; break;
+			default: return;
+		}
+		e.preventDefault();
+	});
+	// #m:ss or #seconds in the URL starts there.
+	const h = location.hash.slice(1);
+	if (h) {
+		const [a, b] = h.split(':').map(Number);
+		const t = b === undefined ? a : a * 60 + b;
+		if (t > 0) v.addEventListener('loadedmetadata', () => { v.currentTime = t; }, { once: true });
+	}
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+#!/bin/bash
+# The film takes an hour to render, so a commit does not re-render it (that is
+# ./build.sh, run on purpose). A commit does run the timeline check, which
+# walks the whole film headless in a few seconds and catches script errors.
+set -euo pipefail
+[ "${SKIP_BUILD:-0}" = "1" ] && exit 0
+cd "$(git rev-parse --show-toplevel)"
+git diff --cached --name-only | grep -qE '^project/' || exit 0
+GODOT="${GODOT:-$(command -v godot4 || echo /usr/local/bin/godot4)}"
+if [ ! -x "$GODOT" ]; then
+	echo "pre-commit: no Godot at $GODOT - set GODOT, or SKIP_BUILD=1" >&2
+	exit 1
+fi
+export HOME="${HOME:-/root}"
+"$GODOT" --headless --path project --import > /dev/null 2>&1 || true
+echo "pre-commit: checking the timeline..." >&2
+timeout 300 "$GODOT" --headless --path project -- --check > /tmp/bludleigh-film-check.log 2>&1 || true
+if grep -qE "SCRIPT ERROR|Parse Error" /tmp/bludleigh-film-check.log || ! grep -q "^FILM COMPLETE" /tmp/bludleigh-film-check.log; then
+	grep -E "SCRIPT ERROR|Parse Error" /tmp/bludleigh-film-check.log | head >&2 || true
+	echo "pre-commit: timeline check failed (log: /tmp/bludleigh-film-check.log)" >&2
+	exit 1
+fi
+grep "^FILM COMPLETE" /tmp/bludleigh-film-check.log >&2
+if git diff --cached --name-only | grep -qE '^project/' && ! git diff --cached --name-only | grep -q '^web/bludleigh.mp4'; then
+	echo "pre-commit: note - project/ changed but web/bludleigh.mp4 did not; run ./build.sh to re-render before deploying" >&2
+fi
+git add project

@@ -1,0 +1,21 @@
+#!/bin/bash
+[ "${SKIP_DEPLOY:-0}" = "1" ] && exit 0
+[ "$(git rev-parse --abbrev-ref HEAD)" = "main" ] || exit 0
+DEPLOY="${DEPLOY:-/opt/scripts/deploy.sh}"
+APP="${DEPLOY_APP:-bludleigh-film}"
+REPO="${DEPLOY_REPO:-nathandunn/bludleigh-film}"
+PORT="${DEPLOY_PORT:-80}"
+if [ ! -x "$DEPLOY" ]; then
+	echo "post-commit: no $DEPLOY on this machine - push and deploy from the hub" >&2
+	exit 0
+fi
+cd "$(git rev-parse --show-toplevel)"
+(
+	set -e
+	export HOME="${HOME:-/root}"
+	if [ -x /opt/scripts/git-cred-sm.sh ]; then /opt/scripts/git-cred-sm.sh > /dev/null 2>&1 || true; fi
+	git push -q origin HEAD
+	"$DEPLOY" "$APP" "$REPO" "$PORT"
+	echo "DEPLOYED $(git rev-parse --short HEAD)"
+) > /tmp/bludleigh-film-deploy.log 2>&1 &
+echo "post-commit: pushing and deploying in the background (tail -f /tmp/bludleigh-film-deploy.log)" >&2
