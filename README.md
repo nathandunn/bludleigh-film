@@ -67,3 +67,19 @@ Because the render takes an hour, the commit hook does **not** re-render:
 `/opt/scripts/deploy.sh`, pushes and redeploys. `SKIP_BUILD=1` skips the check;
 `SKIP_DEPLOY=1` skips the deploy. Deployed on the Precog hub as
 `bludleigh-film`.
+
+## Watching it live: the Mac app
+
+`project/export_presets.cfg` has a macOS preset (universal, ad-hoc signed by
+Godot's built-in codesign, so it exports from Linux):
+
+```
+godot4 --headless --path project --export-release macOS dist/Bludleigh-macOS.zip
+```
+
+needs the 4.4.1 `macos.zip` export template in
+`~/.local/share/godot/export_templates/4.4.1.stable/`. The app plays the film in
+real time on the real GPU — no WebGL, so none of Safari's trouble — with Space to
+pause, ← → to jump a page, F for full screen and Esc to quit. It is not
+notarised, so the first launch is right-click → Open. `web/Bludleigh-macOS.zip`
+is the download the player page links to.

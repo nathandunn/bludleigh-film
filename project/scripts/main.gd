@@ -74,6 +74,8 @@ var _beats_total: float = 0.0
 
 func _ready() -> void:
 	RenderingServer.set_default_clear_color(Ink.PAPER)
+	# Keys still work while paused; the children (cast, lettering) stop.
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	_check = _has_flag("--check")
 	# --audit: the whole film at speed, rendered but not recorded, so every
 	# page's lettering is laid out at the real frame size and checked. Minutes,
@@ -99,6 +101,7 @@ func _ready() -> void:
 		var f := Figure.create(c["face"], c["costume"], c["tint"], skins[c["skin"]], c["h"], i * 0.37)
 		f.name = id
 		f.visible = false
+		f.process_mode = Node.PROCESS_MODE_PAUSABLE
 		add_child(f)
 		cast[id] = f
 		i += 1
@@ -108,6 +111,7 @@ func _ready() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	letters = Lettering.new()
+	letters.process_mode = Node.PROCESS_MODE_PAUSABLE
 	letters.folio = ""
 	layer.add_child(letters)
 	pages = Story.pages()
@@ -137,6 +141,8 @@ var _stop_at := 0.0
 
 
 func _process(delta: float) -> void:
+	if get_tree().paused:
+		return
 	_frames += 1
 	if _frames == 1:
 		return   # the first frame carries the load time; not film time
@@ -595,3 +601,40 @@ func _arg(key: String) -> String:
 
 func _has_flag(key: String) -> bool:
 	return OS.get_cmdline_user_args().has(key)
+
+
+# --- Watching it live ------------------------------------------------------------------------
+## Native builds play the film in real time. Space pauses, → and ← jump a page,
+## Home starts over, F is full screen, Esc quits. None of this exists offline.
+
+func _unhandled_input(e: InputEvent) -> void:
+	if OS.has_feature("movie") or _check or _audit:
+		return
+	if e is InputEventKey and e.pressed and not e.echo:
+		match e.keycode:
+			KEY_SPACE, KEY_K:
+				get_tree().paused = not get_tree().paused
+			KEY_RIGHT, KEY_PAGEDOWN, KEY_D:
+				_jump(index + 1)
+			KEY_LEFT, KEY_PAGEUP, KEY_A:
+				_jump(maxi(index - 1, 0))
+			KEY_HOME, KEY_R:
+				_jump(0)
+			KEY_F, KEY_F11:
+				var w := DisplayServer.window_get_mode()
+				DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if w == DisplayServer.WINDOW_MODE_FULLSCREEN else DisplayServer.WINDOW_MODE_FULLSCREEN)
+			KEY_ESCAPE, KEY_Q:
+				get_tree().quit()
+	elif e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+		get_tree().paused = not get_tree().paused
+
+
+## Cut straight to page [param to]: everyone on their marks, no walk.
+func _jump(to: int) -> void:
+	if to >= pages.size():
+		return
+	get_tree().paused = false
+	_walks.clear()
+	_pending = to
+	_cut_done = false
+	_start_cut()
