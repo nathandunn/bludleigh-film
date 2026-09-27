@@ -13,7 +13,7 @@
 set -euo pipefail
 GODOT="${1:-godot4}"
 RES="${RES:-1920x1080}"
-CRF="${CRF:-20}"
+CRF="${CRF:-24}"             # ~80 MB for the six minutes; GitHub refuses files over 100 MB
 cd "$(dirname "$0")"
 export HOME="${HOME:-/root}"
 FFMPEG="${FFMPEG:-$(python3 -c 'import imageio_ffmpeg as f; print(f.get_ffmpeg_exe())' 2>/dev/null || command -v ffmpeg)}"
@@ -32,6 +32,7 @@ if grep -qE "SCRIPT ERROR|Parse Error" "$work/check.log" || ! grep -q "^FILM COM
 fi
 grep "^FILM COMPLETE" "$work/check.log" >&2
 
+if [ "${SKIP_AUDIT:-0}" = "1" ]; then echo "build: skipping the audit" >&2; else
 echo "build: auditing the lettering at $RES..." >&2
 xvfb-run -a -s "-screen 0 ${RES}x24" env LIBGL_ALWAYS_SOFTWARE=1 \
 	"$GODOT" --display-driver x11 --rendering-driver opengl3 --resolution "$RES" --path project -- --audit \
@@ -42,6 +43,7 @@ if grep -qE "SCRIPT ERROR|Parse Error|^LAYOUT" "$work/audit.log" || ! grep -q "0
 	exit 1
 fi
 grep "^FILM COMPLETE" "$work/audit.log" >&2
+fi
 
 # Render scene by scene (resumable), then stitch: the chunks share a codec, so
 # ffmpeg's concat demuxer joins them without touching a frame before the one
@@ -63,7 +65,9 @@ for line in open(log):
         _, t, name = line.rstrip("\n").split(" ", 2)
         print("CHAPTER %.2f %s" % (float(t) + off / 24.0, name))
 EOF2
-	frames="$("$FFMPEG" -hide_banner -i "$f" -map 0:v:0 -c copy -f null - 2>&1 | sed -nE 's/.*frame= *([0-9]+).*/\1/p' | tail -1)"
+	# The director's own count, from the chunk's log: exact, and no decode.
+	frames="$(sed -nE 's/^FILM COMPLETE [0-9.]+ s \(([0-9]+) frames.*/\1/p' "$work/chunk_$k.log")"
+	[ -n "$frames" ] || { echo "build: no frame count in chunk_$k.log" >&2; exit 1; }
 	offset=$((offset + frames))
 done
 echo "FILM COMPLETE $(python3 -c "print(round($offset / 24.0, 1))") s ($offset frames at 24 fps)" >> "$work/render.log"
@@ -88,4 +92,6 @@ import sys
 html = open("player/index.html").read().replace("__CHAPTERS__", sys.argv[1]).replace("__MINUTES__", sys.argv[2])
 open("web/index.html", "w").write(html)
 EOF
-echo "made web/bludleigh.mp4 ($(du -h web/bludleigh.mp4 | cut -f1), $minutes), poster and player"
+size=$(stat -c %s web/bludleigh.mp4)
+[ "$size" -lt 99000000 ] || { echo "build: web/bludleigh.mp4 is $((size / 1048576)) MB; GitHub refuses files over 100 MB - raise CRF" >&2; exit 1; }
+echo "made web/bludleigh.mp4 ($((size / 1048576)) MB, $minutes), poster and player"
